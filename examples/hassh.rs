@@ -280,7 +280,8 @@ impl<W: Write> LogWriter<W> {
                 w.flush()?;
             }
             LogWriter::Text(w) => {
-                write!(w, "{}", HasshFmt(hassh))?;
+                write!(w, "{}\n", HasshFmt(hassh))?;
+                w.flush()?;
             }
         }
         Ok(())
