@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Deref;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use crate::packet::{KeyExchange, Packet, Version};
+use crate::packet::{self, KeyExchange, Packet, Version};
 
+/// The `Hassh` of SSH fingerprinting
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hassh {
     pub ts: Option<Duration>,
@@ -52,24 +53,24 @@ impl KeyExchange {
     }
 }
 
+/// Analyze SSH fingerprinting for Hassh
 #[derive(Debug, Default)]
 pub struct Hassher {
     versions: HashMap<(SocketAddr, SocketAddr), Version>,
 }
 
 impl Hassher {
-    pub fn process_packet(&mut self, packet: Packet) -> Option<Hassh> {
+    /// Anaylze a buffered packet
+    pub fn process_packet(&mut self, data: &[u8], ts: Option<Duration>) -> Option<Hassh> {
+        let (src, dest, packet) = packet::parse(data).ok().flatten()?;
+
         match packet {
-            Packet::Version { src, dest, version } => {
+            Packet::Version(version) => {
                 self.versions.insert((src, dest), version);
                 None
             }
-            Packet::KeyExchange { src, dest, kex } => Some(Hassh {
-                ts: Some(
-                    SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap(),
-                ),
+            Packet::KeyExchange(kex) => Some(Hassh {
+                ts,
                 src,
                 dest,
                 version: self.versions.get(&(src, dest)).cloned()?,

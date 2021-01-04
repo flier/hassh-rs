@@ -1,3 +1,4 @@
+//! Anaylyze the SSH packet
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 use std::str;
@@ -17,20 +18,14 @@ use ssh_parser::{
 
 use crate::Error;
 
+/// The SSH packet
 #[derive(Clone, Debug, PartialEq)]
 pub enum Packet {
-    Version {
-        src: SocketAddr,
-        dest: SocketAddr,
-        version: Version,
-    },
-    KeyExchange {
-        src: SocketAddr,
-        dest: SocketAddr,
-        kex: KeyExchange,
-    },
+    Version(Version),
+    KeyExchange(KeyExchange),
 }
 
+/// The SSH version
 #[derive(Clone, Debug, PartialEq)]
 pub struct Version {
     pub proto: String,
@@ -62,6 +57,7 @@ impl fmt::Display for Version {
     }
 }
 
+/// The SSH key exchange algorithms
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeyExchange {
     pub kex_algs: String,
@@ -112,34 +108,38 @@ impl From<SshPacketKeyExchange<'_>> for KeyExchange {
     }
 }
 
-pub fn parse(data: &[u8]) -> Result<Option<Packet>, Error> {
-    let eth = EthernetPacket::new(data).ok_or(Error::Packet("ethernet".into()))?;
+/// Parse a SSH packet
+pub fn parse(data: &[u8]) -> Result<Option<(SocketAddr, SocketAddr, Packet)>, Error> {
+    let eth = EthernetPacket::new(data).ok_or_else(|| Error::Packet("ethernet".into()))?;
     let ty = eth.get_ethertype();
     parse_ethernet(ty, eth.payload())
 }
 
-fn parse_ethernet(ty: EtherType, payload: &[u8]) -> Result<Option<Packet>, Error> {
+fn parse_ethernet(
+    ty: EtherType,
+    payload: &[u8],
+) -> Result<Option<(SocketAddr, SocketAddr, Packet)>, Error> {
     match ty {
         EtherTypes::Vlan => VlanPacket::new(payload)
-            .ok_or(Error::Packet("vlan".into()))
+            .ok_or_else(|| Error::Packet("vlan".into()))
             .and_then(|vlan| parse_ethernet(vlan.get_ethertype(), vlan.payload())),
 
         EtherTypes::Ipv4 => Ipv4Packet::new(payload)
-            .ok_or(Error::Packet("ipv4".into()))
+            .ok_or_else(|| Error::Packet("ipv4".into()))
             .and_then(parse_ipv4),
 
         EtherTypes::Ipv6 => Ipv6Packet::new(payload)
-            .ok_or(Error::Packet("ipv4".into()))
+            .ok_or_else(|| Error::Packet("ipv4".into()))
             .and_then(parse_ipv6),
 
         _ => Ok(None),
     }
 }
 
-fn parse_ipv4(ip: Ipv4Packet) -> Result<Option<Packet>, Error> {
+fn parse_ipv4(ip: Ipv4Packet) -> Result<Option<(SocketAddr, SocketAddr, Packet)>, Error> {
     if ip.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
         TcpPacket::new(ip.payload())
-            .ok_or(Error::Packet("tcp".into()))
+            .ok_or_else(|| Error::Packet("tcp".into()))
             .and_then(|tcp| {
                 parse_tcp(
                     IpAddr::V4(ip.get_source()),
@@ -152,10 +152,10 @@ fn parse_ipv4(ip: Ipv4Packet) -> Result<Option<Packet>, Error> {
     }
 }
 
-fn parse_ipv6(ip: Ipv6Packet) -> Result<Option<Packet>, Error> {
+fn parse_ipv6(ip: Ipv6Packet) -> Result<Option<(SocketAddr, SocketAddr, Packet)>, Error> {
     if ip.get_next_header() == IpNextHeaderProtocols::Tcp {
         TcpPacket::new(ip.payload())
-            .ok_or(Error::Packet("tcp".into()))
+            .ok_or_else(|| Error::Packet("tcp".into()))
             .and_then(|tcp| {
                 parse_tcp(
                     IpAddr::V6(ip.get_source()),
@@ -168,27 +168,22 @@ fn parse_ipv6(ip: Ipv6Packet) -> Result<Option<Packet>, Error> {
     }
 }
 
-fn parse_tcp(saddr: IpAddr, daddr: IpAddr, tcp: TcpPacket) -> Result<Option<Packet>, Error> {
+fn parse_tcp(
+    saddr: IpAddr,
+    daddr: IpAddr,
+    tcp: TcpPacket,
+) -> Result<Option<(SocketAddr, SocketAddr, Packet)>, Error> {
     let src = SocketAddr::new(saddr, tcp.get_source());
     let dest = SocketAddr::new(daddr, tcp.get_destination());
     let payload = tcp.payload();
 
     if payload.starts_with(b"SSH-") {
-        parse_ssh_identification(payload).map(|(_, (_, version))| {
-            Some(Packet::Version {
-                src,
-                dest,
-                version: version.into(),
-            })
-        })
+        parse_ssh_identification(payload)
+            .map(|(_, (_, version))| Some((src, dest, Packet::Version(version.into()))))
     } else {
         parse_ssh_packet(payload).map(|(_, (pkt, _))| {
             if let SshPacket::KeyExchange(kex) = pkt {
-                Some(Packet::KeyExchange {
-                    src,
-                    dest,
-                    kex: kex.into(),
-                })
+                Some((src, dest, Packet::KeyExchange(kex.into())))
             } else {
                 None
             }

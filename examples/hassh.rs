@@ -1,8 +1,8 @@
 use std::fmt;
 use std::fs::OpenOptions;
-use std::io::{LineWriter, Write};
+use std::io::{self, LineWriter, Write};
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::SystemTime;
 
@@ -11,7 +11,7 @@ use log::debug;
 use serde::Serialize;
 use structopt::StructOpt;
 
-use hassh::{live, pcap, Hassh};
+use hassh::{live, packet::KeyExchange, pcap, Hassh};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -44,16 +44,27 @@ struct Opt {
     log_format: Option<LogFormat>,
 
     /// "specify the output log file
-    #[structopt(short, long, default_value = "hassh.log", parse(from_os_str))]
-    output_file: PathBuf,
+    #[structopt(short, long, parse(from_os_str))]
+    output_file: Option<PathBuf>,
 
     /// save the live captured packets to this file
     #[structopt(short, long, parse(from_os_str))]
     write_pcap: Option<PathBuf>,
+}
 
-    /// don't print the output
-    #[structopt(short, long)]
-    silence: bool,
+impl Opt {
+    pub fn output_file(&self) -> &Path {
+        self.output_file.as_ref().map_or_else(
+            || {
+                Path::new(match self.log_format {
+                    Some(LogFormat::CSV) => "hassh.csv",
+                    Some(LogFormat::JSON) => "hassh.json",
+                    None => "hassh.log",
+                })
+            },
+            |s| s.as_path(),
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -163,7 +174,7 @@ impl fmt::Display for HasshFmt {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Row<'a> {
+struct Row {
     pub timestamp: String,
     pub source_ip: IpAddr,
     pub destination_ip: IpAddr,
@@ -174,58 +185,77 @@ struct Row<'a> {
     pub hassh: String,
     pub hassh_version: &'static str,
     pub hassh_algorithms: String,
-    pub kex_algs: &'a str,
-    pub enc_algs: &'a str,
-    pub mac_algs: &'a str,
-    pub cmp_algs: &'a str,
+    pub kex_algs: String,
+    pub enc_algs: String,
+    pub mac_algs: String,
+    pub cmp_algs: String,
 }
 
 const HASSH_VERSION: &str = "1.0";
 
-impl<'a> From<&'a Hassh> for Row<'a> {
-    fn from(hassh: &Hassh) -> Row {
+impl From<Hassh> for Row {
+    fn from(hassh: Hassh) -> Row {
         let is_server = hassh.is_server();
+        let timestamp = hassh
+            .ts
+            .map(|ts| humantime::format_rfc3339_millis(SystemTime::UNIX_EPOCH + ts).to_string())
+            .unwrap_or_default();
+        let source_ip = hassh.src.ip();
+        let destination_ip = hassh.dest.ip();
+        let source_port = hassh.src.port();
+        let destination_port = hassh.dest.port();
+        let identification_string = hassh.version.to_string();
+        let hash = format!(
+            "{:x}",
+            if is_server {
+                hassh.server_hash()
+            } else {
+                hassh.client_hash()
+            }
+        );
+        let hassh_algorithms = if is_server {
+            hassh.server_algo()
+        } else {
+            hassh.client_algo()
+        };
+
+        let KeyExchange {
+            kex_algs,
+            encr_algs_server_to_client,
+            encr_algs_client_to_server,
+            mac_algs_server_to_client,
+            mac_algs_client_to_server,
+            comp_algs_server_to_client,
+            comp_algs_client_to_server,
+            ..
+        } = hassh.kex;
 
         Row {
-            timestamp: hassh
-                .ts
-                .map(|ts| humantime::format_rfc3339_millis(SystemTime::UNIX_EPOCH + ts).to_string())
-                .unwrap_or_default(),
-            source_ip: hassh.src.ip(),
-            destination_ip: hassh.dest.ip(),
-            source_port: hassh.src.port(),
-            destination_port: hassh.dest.port(),
+            timestamp,
+            source_ip,
+            destination_ip,
+            source_port,
+            destination_port,
             hassh_type: if is_server { "server" } else { "client" },
-            identification_string: hassh.version.to_string(),
-            hassh: format!(
-                "{:x}",
-                if is_server {
-                    hassh.server_hash()
-                } else {
-                    hassh.client_hash()
-                }
-            ),
+            identification_string,
+            hassh: hash,
             hassh_version: HASSH_VERSION,
-            hassh_algorithms: if is_server {
-                hassh.server_algo()
-            } else {
-                hassh.client_algo()
-            },
-            kex_algs: &hassh.kex_algs,
+            hassh_algorithms,
+            kex_algs,
             enc_algs: if is_server {
-                &hassh.encr_algs_server_to_client
+                encr_algs_server_to_client
             } else {
-                &hassh.encr_algs_client_to_server
+                encr_algs_client_to_server
             },
             mac_algs: if is_server {
-                &hassh.mac_algs_server_to_client
+                mac_algs_server_to_client
             } else {
-                &hassh.mac_algs_client_to_server
+                mac_algs_client_to_server
             },
             cmp_algs: if is_server {
-                &hassh.comp_algs_server_to_client
+                comp_algs_server_to_client
             } else {
-                &hassh.comp_algs_client_to_server
+                comp_algs_client_to_server
             },
         }
     }
@@ -234,19 +264,23 @@ impl<'a> From<&'a Hassh> for Row<'a> {
 enum LogWriter<W: Write> {
     JSON(W),
     CSV(csv::Writer<W>),
+    Text(io::Stdout),
 }
 
 impl<W: Write> LogWriter<W> {
-    fn write(&mut self, row: Row) -> Result<(), Error> {
+    fn write(&mut self, hassh: Hassh) -> Result<(), Error> {
         match self {
             LogWriter::JSON(w) => {
                 let mut w = LineWriter::new(w);
-                serde_json::to_writer(&mut w, &row)?;
+                serde_json::to_writer(&mut w, &Row::from(hassh))?;
                 w.write(b"\n")?;
             }
             LogWriter::CSV(w) => {
-                w.serialize(&row)?;
+                w.serialize(&Row::from(hassh))?;
                 w.flush()?;
+            }
+            LogWriter::Text(w) => {
+                write!(w, "{}", HasshFmt(hassh))?;
             }
         }
         Ok(())
@@ -254,10 +288,9 @@ impl<W: Write> LogWriter<W> {
 }
 
 fn process_hassh<W: Write>(
-    out: Option<&mut LogWriter<W>>,
+    out: &mut LogWriter<W>,
     hassh: Hassh,
     fingerprint: Fingerprint,
-    silence: bool,
 ) -> Result<(), Error> {
     let is_server = hassh.is_server();
 
@@ -265,14 +298,7 @@ fn process_hassh<W: Write>(
         Fingerprint::Client if is_server => Ok(()),
         Fingerprint::Server if !is_server => Ok(()),
         _ => {
-            if let Some(writer) = out {
-                writer.write(Row::from(&hassh))?;
-            }
-
-            if !silence {
-                println!("{}", HasshFmt(hassh));
-            }
-
+            out.write(hassh)?;
             Ok(())
         }
     }
@@ -285,30 +311,30 @@ pub fn main() -> Result<(), Error> {
     debug!("{:#?}", opt);
 
     let mut out = {
-        let output_file = &opt.output_file;
-        let output_file = move || {
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(output_file)
-        };
+        let filename = opt.output_file();
+        let output_file = move || OpenOptions::new().create(true).append(true).open(filename);
 
         match opt.log_format {
             Some(LogFormat::CSV) => {
+                debug!("write to CSV file: {}", filename.display());
+
                 let f = output_file()?;
                 let w = csv::WriterBuilder::new()
                     .has_headers(f.metadata()?.len() == 0)
                     .from_writer(f);
-                Some(LogWriter::CSV(w))
+                LogWriter::CSV(w)
             }
-            Some(LogFormat::JSON) => Some(LogWriter::JSON(output_file()?)),
-            _ => None,
+            Some(LogFormat::JSON) => {
+                debug!("write to JSON file: {}", filename.display());
+
+                LogWriter::JSON(output_file()?)
+            }
+            _ => LogWriter::Text(io::stdout()),
         }
     };
 
     let fingerprint = opt.fingerprint;
-    let silence = opt.silence;
-    let mut log_hassh = move |hassh| process_hassh(out.as_mut(), hassh, fingerprint, silence);
+    let mut log_hassh = move |hassh| process_hassh(&mut out, hassh, fingerprint);
 
     for path in opt.file {
         for hassh in pcap::open(path).map(Box::new)? {

@@ -3,8 +3,10 @@ extern crate log;
 
 mod error;
 mod hassh;
-mod packet;
+pub mod packet;
 
+#[cfg(feature = "capi")]
+pub mod capi;
 #[cfg(feature = "live-capture")]
 pub mod live;
 #[cfg(feature = "pcap-file")]

@@ -1,3 +1,5 @@
+//! Read a PCAP buffer or file to analyze SSH fingerprinting
+
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -9,14 +11,14 @@ use pcap_parser::{
 
 use crate::{
     hassh::{Hassh, Hassher},
-    packet, Error,
+    Error,
 };
 
 const DEFAULT_IF_TSRESOL: u8 = 6;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TimestampResolution(u8);
+struct TimestampResolution(u8);
 
 impl Default for TimestampResolution {
     fn default() -> Self {
@@ -42,7 +44,8 @@ impl TimestampResolution {
     }
 }
 
-struct Reader<'a, R: Read + 'a> {
+/// Read a PCAP buffer or file to analyze SSH fingerprinting
+pub struct Reader<'a, R: Read + 'a> {
     reader: Box<dyn PcapReaderIterator<R> + 'a>,
     hassher: Hassher,
     if_tsresols: Vec<TimestampResolution>,
@@ -80,13 +83,10 @@ impl<'a, R: Read + 'a> Iterator for Reader<'a, R> {
                         _ => continue,
                     };
 
-                    let res = packet::parse(data).map(|packet| {
-                        packet.and_then(|packet| self.hassher.process_packet(packet))
-                    });
+                    let res = self.hassher.process_packet(data, ts);
                     self.reader.consume(offset);
-                    if let Ok(Some(mut hassh)) = res {
-                        hassh.ts = ts;
-                        return Some(hassh);
+                    if res.is_some() {
+                        return res;
                     }
                 }
                 Err(PcapError::Incomplete) => {
@@ -100,7 +100,20 @@ impl<'a, R: Read + 'a> Iterator for Reader<'a, R> {
     }
 }
 
-pub fn open<'a, P>(path: P) -> Result<impl Iterator<Item = Hassh>, Error>
+/// Parse a PCAP buffer to analyze SSH fingerprinting
+pub fn parse<'a, R>(buf: R) -> Result<Reader<'a, R>, Error>
+where
+    R: Read + 'static,
+{
+    Ok(Reader {
+        reader: create_reader(65536, buf)?,
+        hassher: Hassher::default(),
+        if_tsresols: Vec::new(),
+    })
+}
+
+/// Parse a PCAP file to analyze SSH fingerprinting
+pub fn open<'a, P>(path: P) -> Result<Reader<'a, File>, Error>
 where
     P: AsRef<Path>,
 {
@@ -108,11 +121,5 @@ where
 
     trace!("open pcap file {:?}", path);
 
-    let file = File::open(path)?;
-
-    Ok(Reader {
-        reader: create_reader(65536, file)?,
-        hassher: Hassher::default(),
-        if_tsresols: Vec::new(),
-    })
+    parse(File::open(path)?)
 }
