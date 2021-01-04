@@ -65,10 +65,12 @@ impl<'a, R: Read + 'a> Iterator for Reader<'a, R> {
                         ),
                         PcapBlockOwned::NG(Block::SectionHeader(_)) => {
                             self.if_tsresols.clear();
+                            self.reader.consume(offset);
                             continue;
                         }
                         PcapBlockOwned::NG(Block::InterfaceDescription(intf)) => {
                             self.if_tsresols.push(TimestampResolution(intf.if_tsresol));
+                            self.reader.consume(offset);
                             continue;
                         }
                         PcapBlockOwned::NG(Block::EnhancedPacket(packet)) => (
@@ -80,7 +82,10 @@ impl<'a, R: Read + 'a> Iterator for Reader<'a, R> {
                             packet.data,
                         ),
                         PcapBlockOwned::NG(Block::SimplePacket(packet)) => (None, packet.data),
-                        _ => continue,
+                        _ => {
+                            self.reader.consume(offset);
+                            continue;
+                        }
                     };
 
                     let res = self.hassher.process_packet(data, ts);
