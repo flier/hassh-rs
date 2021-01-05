@@ -2,7 +2,6 @@
 
 [![License: BSD 3-Clause License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![crates.io](https://img.shields.io/crates/v/hassh.svg)](https://crates.io/crates/hassh)
-[![Build Status](https://travis-ci.org/flier/hassh-rs.svg?branch=master)](https://travis-ci.org/jabedude/hassh-rs)
 [![Documentation](https://docs.rs/hassh/badge.svg)](https://docs.rs/hassh/)
 
 This crate enables a consumer to fingerprint the [Key Exchange](https://tools.ietf.org/html/rfc4253#section-6.5) portion of a SSH handshake. It can hash SSH handshakes over IPv4 and IPv6. It heavily depends on the [ssh-parser](https://github.com/rusticata/ssh-parser) project from [Rusticata](https://github.com/rusticata).
