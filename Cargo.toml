@@ -3,8 +3,16 @@ name = "hassh"
 version = "0.1.0"
 authors = ["Flier Lu <flier.lu@gmail.com>"]
 edition = "2018"
+description = "A SSH fingerprinting library written in Rust"
+documentation = "https://docs.rs/hassh"
+readme = "README.md"
+repository = "https://github.com/flier/hassh-rs"
+license = "BSD-3-Clause"
+keywords = ["ssh", "fingerprinting", "security"]
+categories = ["network-programming"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[badges]
+maintenance = { status = "experimental" }
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
