@@ -14,9 +14,9 @@ pub enum Error {
     #[error(transparent)]
     Live(#[from] pcap::Error),
 
-    #[error("fail to parse ssh packet, {0}")]
+    #[error("parse ssh packet, {0}")]
     Nom(String),
 
-    #[error("fail to parse {0} packet")]
+    #[error("parse {0} packet")]
     Packet(String),
 }

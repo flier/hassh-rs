@@ -13,4 +13,4 @@ pub mod live;
 pub mod pcap;
 
 pub use self::error::Error;
-pub use self::hassh::Hassh;
+pub use self::hassh::{Hassh, Hassher};

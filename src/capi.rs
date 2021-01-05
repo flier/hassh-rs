@@ -169,7 +169,7 @@ mod pcap {
     ///
     /// @param reader  The `BufReader` object
     #[no_mangle]
-    pub extern "C" fn hassh_buf_reader_free<'a>(reader: Option<NonNull<BufReader<'a>>>) {
+    pub extern "C" fn hassh_buf_reader_free(reader: Option<NonNull<BufReader>>) {
         if let Some(reader) = reader {
             drop(unsafe { Box::from_raw(reader.as_ptr()) })
         }
@@ -179,7 +179,7 @@ mod pcap {
     ///
     /// @param reader  The `FileReader` object
     #[no_mangle]
-    pub extern "C" fn hassh_file_reader_free<'a>(reader: Option<NonNull<FileReader<'a>>>) {
+    pub extern "C" fn hassh_file_reader_free(reader: Option<NonNull<FileReader>>) {
         if let Some(reader) = reader {
             drop(unsafe { Box::from_raw(reader.as_ptr()) })
         }
@@ -190,8 +190,8 @@ mod pcap {
     /// @param reader  The `BufReader` object to analyze SSH fingerprinting
     /// @return         The pointer to the new `Hassh` object, should be free with `hassh_free`, or nullptr for EOF
     #[no_mangle]
-    pub extern "C" fn hassh_buf_reader_next<'a>(
-        reader: Option<NonNull<BufReader<'a>>>,
+    pub extern "C" fn hassh_buf_reader_next(
+        reader: Option<NonNull<BufReader>>,
     ) -> Option<NonNull<Hassh>> {
         reader
             .and_then(|mut reader| unsafe { reader.as_mut() }.next())
@@ -205,8 +205,8 @@ mod pcap {
     /// @param reader  The `FileReader` object to analyze SSH fingerprinting
     /// @return         The pointer to the new `Hassh` object, should be free with `hassh_free`, or nullptr for EOF
     #[no_mangle]
-    pub extern "C" fn hassh_file_reader_next<'a>(
-        reader: Option<NonNull<FileReader<'a>>>,
+    pub extern "C" fn hassh_file_reader_next(
+        reader: Option<NonNull<FileReader>>,
     ) -> Option<NonNull<Hassh>> {
         reader
             .and_then(|mut reader| unsafe { reader.as_mut() }.next())
@@ -273,7 +273,7 @@ mod live {
     /// @param cap      The `Capture` object to analyze SSH fingerprinting
     /// @return         The pointer to the new `Hassh` object, should be free with `hassh_free`, or nullptr for EOF
     #[no_mangle]
-    pub extern "C" fn hassh_capture_next<'a>(
+    pub extern "C" fn hassh_capture_next(
         cap: Option<NonNull<live::Capture>>,
     ) -> Option<NonNull<Hassh>> {
         cap.and_then(|mut cap| unsafe { cap.as_mut() }.next())
