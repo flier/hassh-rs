@@ -23,6 +23,9 @@ capi = ["libc"]
 pcap-file = ["pcap-parser"]
 live-capture = ["pcap"]
 
+# Flag for docs.rs builds where libpcap is not present.
+docs-rs = ["pcap/docs-rs"]
+
 [dependencies]
 log = "0.4"
 thiserror = "1.0"
@@ -52,3 +55,6 @@ cbindgen = "0.16"
 [[example]]
 name = "hassh"
 required-features = ["pcap-file", "live-capture"]
+
+[package.metadata.docs.rs]
+features = ["capi", "docs-rs"]
